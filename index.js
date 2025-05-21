@@ -8,6 +8,7 @@ dotenv.config();
 const app = express();
 app.use(express.json());
 
+// Auth with Google service account
 const auth = new google.auth.GoogleAuth({
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   credentials: JSON.parse(fs.readFileSync("credentials.json", "utf-8"))
@@ -20,75 +21,65 @@ app.post("/", async (req, res) => {
 
   const { action, lender_name, loan_data } = req.body;
 
-  if (!action) {
-    console.log("❌ Missing 'action'");
-    return res.status(400).send("❌ Missing 'action'");
+  if (!action || action !== "updateLender") {
+    console.log("❌ Invalid or missing 'action'");
+    return res.status(400).send("❌ Missing or invalid 'action'");
   }
 
-  if (action !== "updateLender") {
-    console.log("❌ Invalid action:", action);
-    return res.status(400).send("❌ Invalid action");
+  if (!lender_name || !Array.isArray(loan_data)) {
+    console.log("❌ Missing 'lender_name' or 'loan_data' invalid");
+    return res.status(400).send("❌ Missing lender_name or loan_data");
   }
 
-  if (!lender_name) {
-    console.log("❌ Missing 'lender_name'");
-    return res.status(400).send("❌ Missing lender_name");
-  }
-
-  if (!Array.isArray(loan_data)) {
-    console.log("❌ 'loan_data' is not an array");
-    return res.status(400).send("❌ 'loan_data' must be an array");
-  }
-
-  console.log("✅ Payload validated. Proceeding to update sheet...");
+  const header = [
+    "Loan Type", "Program Name", "Min FICO", "Max LTV", "Min Loan Amount", "Max Loan Amount",
+    "Occupancy", "Property Type", "DTI Limit", "MI Requirement", "Prepayment Penalty",
+    "Reserve Requirement", "Min DSCR", "Notes / Highlights", "Product Source"
+  ];
 
   try {
     const sheets = google.sheets({ version: "v4", auth });
-    const sheetId = process.env.GOOGLE_SHEET_ID;
+    const spreadsheetId = process.env.GOOGLE_SHEET_ID;
 
-    const header = [
-      "Loan Type", "Program Name", "Min FICO", "Max LTV", "Min Loan Amount", "Max Loan Amount",
-      "Occupancy", "Property Type", "DTI Limit", "MI Requirement", "Prepayment Penalty",
-      "Reserve Requirement", "Min DSCR", "Notes / Highlights", "Product Source"
-    ];
+    // Step 1: Check if the sheet exists
+    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+    const sheetExists = spreadsheet.data.sheets.some(
+      (s) => s.properties.title === lender_name
+    );
 
-// Check if sheet exists
-const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
-const sheetExists = spreadsheet.data.sheets.some(
-  s => s.properties.title === lender_name
-);
-
-// If not, add it
-if (!sheetExists) {
-  await sheets.spreadsheets.batchUpdate({
-    spreadsheetId: sheetId,
-    requestBody: {
-      requests: [{
-        addSheet: {
-          properties: {
-            title: lender_name
-          }
+    // Step 2: Create sheet if it doesn't exist
+    if (!sheetExists) {
+      console.log(`ℹ️ Sheet '${lender_name}' not found. Creating...`);
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [
+            {
+              addSheet: {
+                properties: {
+                  title: lender_name
+                }
+              }
+            }
+          ]
         }
-      }]
+      });
     }
-  });
-}
 
-// Now update the new/existing sheet
-await sheets.spreadsheets.values.update({
-  spreadsheetId: sheetId,
-  range: `'${lender_name}'!A1`,
-  valueInputOption: "RAW",
-  requestBody: {
-    values: [header, ...loan_data]
-  }
-});
+    // Step 3: Write header + data
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `'${lender_name}'!A1`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [header, ...loan_data]
+      }
+    });
 
-
-    console.log(`✅ Updated tab '${lender_name}'`);
+    console.log(`✅ '${lender_name}' updated successfully`);
     res.send(`✅ '${lender_name}' updated successfully`);
   } catch (err) {
-    console.log("❌ Google Sheets API Error:", err.message);
+    console.error("❌ Google Sheets API Error:", err.message);
     res.status(500).send("❌ Error: " + err.message);
   }
 });
