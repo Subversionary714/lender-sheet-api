@@ -1,20 +1,19 @@
-import express from "express";
+import expressPkg from "express";
 import { google } from "googleapis";
 import fs from "fs";
 import dotenv from "dotenv";
 
 dotenv.config();
 
+const express = expressPkg.default;
 const app = express();
 app.use(express.json());
 
-// Initialize Sheets API with service account
 const auth = new google.auth.GoogleAuth({
   scopes: ["https://www.googleapis.com/auth/spreadsheets"],
   credentials: JSON.parse(fs.readFileSync("credentials.json", "utf-8"))
 });
 
-// POST endpoint
 app.post("/", async (req, res) => {
   console.log("===== Incoming Request =====");
   console.log("Headers:", req.headers);
@@ -54,7 +53,6 @@ app.post("/", async (req, res) => {
       "Reserve Requirement", "Min DSCR", "Notes / Highlights", "Product Source"
     ];
 
-    // Write header + data to sheet tab
     await sheets.spreadsheets.values.update({
       spreadsheetId: sheetId,
       range: `'${lender_name}'!A1`,
@@ -64,6 +62,7 @@ app.post("/", async (req, res) => {
       }
     });
 
+    console.log(`✅ Updated tab '${lender_name}'`);
     res.send(`✅ '${lender_name}' updated successfully`);
   } catch (err) {
     console.log("❌ Google Sheets API Error:", err.message);
