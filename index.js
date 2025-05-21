@@ -52,14 +52,38 @@ app.post("/", async (req, res) => {
       "Reserve Requirement", "Min DSCR", "Notes / Highlights", "Product Source"
     ];
 
-    await sheets.spreadsheets.values.update({
-      spreadsheetId: sheetId,
-      range: `'${lender_name}'!A1`,
-      valueInputOption: "RAW",
-      requestBody: {
-        values: [header, ...loan_data]
-      }
-    });
+// Check if sheet exists
+const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: sheetId });
+const sheetExists = spreadsheet.data.sheets.some(
+  s => s.properties.title === lender_name
+);
+
+// If not, add it
+if (!sheetExists) {
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId: sheetId,
+    requestBody: {
+      requests: [{
+        addSheet: {
+          properties: {
+            title: lender_name
+          }
+        }
+      }]
+    }
+  });
+}
+
+// Now update the new/existing sheet
+await sheets.spreadsheets.values.update({
+  spreadsheetId: sheetId,
+  range: `'${lender_name}'!A1`,
+  valueInputOption: "RAW",
+  requestBody: {
+    values: [header, ...loan_data]
+  }
+});
+
 
     console.log(`✅ Updated tab '${lender_name}'`);
     res.send(`✅ '${lender_name}' updated successfully`);
