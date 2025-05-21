@@ -1,11 +1,10 @@
-import expressPkg from "express";
+import express from "express";
 import { google } from "googleapis";
 import fs from "fs";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const express = expressPkg.default;
 const app = express();
 app.use(express.json());
 
