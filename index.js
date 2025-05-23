@@ -1,88 +1,95 @@
-import express from "express";
-import { google } from "googleapis";
-import fs from "fs";
-import dotenv from "dotenv";
+import express from 'express';
+import bodyParser from 'body-parser';
+import dotenv from 'dotenv';
+import fs from 'fs';
+import { google } from 'googleapis';
 
 dotenv.config();
 
 const app = express();
-app.use(express.json());
+const PORT = process.env.PORT || 3000;
 
-// Auth with Google service account
+app.use(bodyParser.json());
+
+const HEADERS = [
+  "Loan Type", "Program Name", "Min FICO", "Max LTV", "Min Loan Amount", "Max Loan Amount",
+  "Occupancy", "Property Type", "DTI Limit", "MI Requirement", "Prepayment Penalty",
+  "Reserve Requirement", "Min DSCR", "Notes / Highlights", "Product Source"
+];
+
+const SHEET_ID = process.env.SHEET_ID;
+const CREDENTIALS = JSON.parse(fs.readFileSync('credentials.json', 'utf8'));
+
 const auth = new google.auth.GoogleAuth({
-  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  credentials: JSON.parse(fs.readFileSync("credentials.json", "utf-8"))
+  credentials: CREDENTIALS,
+  scopes: ['https://www.googleapis.com/auth/spreadsheets'],
 });
 
-app.post("/", async (req, res) => {
-  console.log("===== Incoming Request =====");
-  console.log("Headers:", req.headers);
-  console.log("Body:", req.body);
+const sheets = google.sheets({ version: 'v4', auth });
 
-  const { action, lender_name, loan_data } = req.body;
-
-  if (!action || action !== "updateLender") {
-    console.log("❌ Invalid or missing 'action'");
-    return res.status(400).send("❌ Missing or invalid 'action'");
-  }
-
-  if (!lender_name || !Array.isArray(loan_data)) {
-    console.log("❌ Missing 'lender_name' or 'loan_data' invalid");
-    return res.status(400).send("❌ Missing lender_name or loan_data");
-  }
-
-  const header = [
-    "Loan Type", "Program Name", "Min FICO", "Max LTV", "Min Loan Amount", "Max Loan Amount",
-    "Occupancy", "Property Type", "DTI Limit", "MI Requirement", "Prepayment Penalty",
-    "Reserve Requirement", "Min DSCR", "Notes / Highlights", "Product Source"
-  ];
-
+app.post('/', async (req, res) => {
   try {
-    const sheets = google.sheets({ version: "v4", auth });
-    const spreadsheetId = process.env.GOOGLE_SHEET_ID;
+    const { action, lender_name, loan_data } = req.body;
 
-    // Step 1: Check if the sheet exists
-    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
-    const sheetExists = spreadsheet.data.sheets.some(
-      (s) => s.properties.title === lender_name
-    );
+    if (action !== 'updateLender' || !lender_name || !Array.isArray(loan_data)) {
+      return res.status(400).send('❌ Invalid payload');
+    }
 
-    // Step 2: Create sheet if it doesn't exist
+    const sheetTitle = lender_name;
+
+    // Check existing sheets
+    const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId: SHEET_ID });
+    const sheetExists = spreadsheet.data.sheets.some(sheet => sheet.properties.title === sheetTitle);
+
     if (!sheetExists) {
-      console.log(`ℹ️ Sheet '${lender_name}' not found. Creating...`);
       await sheets.spreadsheets.batchUpdate({
-        spreadsheetId,
+        spreadsheetId: SHEET_ID,
         requestBody: {
           requests: [
             {
               addSheet: {
                 properties: {
-                  title: lender_name
-                }
-              }
-            }
-          ]
-        }
+                  title: sheetTitle,
+                },
+              },
+            },
+          ],
+        },
       });
     }
 
-    // Step 3: Write header + data
-    await sheets.spreadsheets.values.update({
-      spreadsheetId,
-      range: `'${lender_name}'!A1`,
-      valueInputOption: "RAW",
-      requestBody: {
-        values: [header, ...loan_data]
-      }
+    // Clear the sheet
+    await sheets.spreadsheets.values.clear({
+      spreadsheetId: SHEET_ID,
+      range: `${sheetTitle}!A1:Z1000`,
     });
 
-    console.log(`✅ '${lender_name}' updated successfully`);
-    res.send(`✅ '${lender_name}' updated successfully`);
-  } catch (err) {
-    console.error("❌ Google Sheets API Error:", err.message);
-    res.status(500).send("❌ Error: " + err.message);
+    // Add headers and data
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${sheetTitle}!A1`,
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: [HEADERS],
+      },
+    });
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId: SHEET_ID,
+      range: `${sheetTitle}!A2`,
+      valueInputOption: 'RAW',
+      requestBody: {
+        values: loan_data,
+      },
+    });
+
+    res.status(200).send(`✅ '${lender_name}' updated successfully`);
+  } catch (error) {
+    console.error('❌ Google Sheets API Error:', error.message);
+    res.status(500).send(`❌ Google Sheets API Error: ${error.message}`);
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🌐 Server listening on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
